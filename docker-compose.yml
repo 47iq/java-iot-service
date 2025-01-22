@@ -8,7 +8,7 @@ services:
     ports:
       - "9091:9091"
     environment:
-      - IOT_CONTROLLER_URL=http://iot-controller:9090
+      - IOT_CONTROLLER_URL=http://iot-controller:9092
     depends_on:
       - iot-controller
 
@@ -17,7 +17,7 @@ services:
       context: iot-controller
       dockerfile: Dockerfile
     ports:
-      - "9090:9090"
+      - "9092:9092"
     environment:
       - SPRING_MONGODB_HOST=mongo-controller
       - SPRING_RABBITMQ_HOST=rabbitmq
@@ -32,11 +32,13 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - SPRING_MONGODB_HOST=mongo-controller
+      - SPRING_MONGODB_HOST=mongo-rule-engine
       - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_MONGODB_PORT=27017
     depends_on:
-      - mongo-controller
+      - mongo-rule-engine
       - rabbitmq
+      - logstash
 
   mongo-controller:
     image: mongo:latest
@@ -58,7 +60,7 @@ services:
     volumes:
       - mongo-rule-engine-data:/data/db
 
-  mongo-express:
+  mongo-express-controller:
     image: mongo-express:latest
     restart: always
     ports:
@@ -67,6 +69,16 @@ services:
       - ME_CONFIG_MONGODB_ADMINUSERNAME=admin
       - ME_CONFIG_MONGODB_ADMINPASSWORD=admin
       - ME_CONFIG_MONGODB_SERVER=mongo-controller
+
+  mongo-express-rule-engine:
+    image: mongo-express:latest
+    restart: always
+    ports:
+      - "8082:8082"
+    environment:
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=admin
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=admin
+      - ME_CONFIG_MONGODB_SERVER=mongo-rule-engine
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -77,6 +89,59 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: admin
       RABBITMQ_DEFAULT_PASS: admin
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./env/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - iot-controller
+  grafana:
+    image: grafana/grafana
+    build: './grafana'
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+  elasticsearch:
+    image: elasticsearch:7.16.1
+    volumes:
+      - ./elasticsearch/config.yaml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+      - ./elasticsearch/data:/usr/share/elasticsearch/data
+    environment:
+      ES_JAVA_OPTS: "-Xmx512m -Xms512m"
+      ELASTIC_USERNAME: "elastic"
+      ELASTIC_PASSWORD: "MyPw123"
+      discovery.type: single-node
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+  logstash:
+    image: logstash:7.16.1
+    volumes:
+      - ./logstash/config.yaml:/usr/share/logstash/config/logstash.yml:ro
+      - ./logstash/pipelines.yaml:/usr/share/logstash/config/pipelines.yml:ro
+      - ./logstash/pipelines:/usr/share/logstash/config/pipelines:ro
+    environment:
+      LS_JAVA_OPTS: "-Xmx512m -Xms512m"
+    ports:
+      - "5044:5044"
+      - "5000:5000"
+      - "9600:9600"
+    depends_on:
+      - elasticsearch
+  kibana:
+    image: kibana:7.16.1
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ./kibana/config.yaml:/usr/share/kibana/config/kibana.yml:ro
+    ports:
+      - "5601:5601"
 
 volumes:
   mongo-controller-data:
